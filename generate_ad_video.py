@@ -87,28 +87,36 @@ print("TTS engine: " + ("ElevenLabs" if ELEVENLABS_KEY else "Edge-TTS"))
 # Masing-masing slide sesuai ide bisnis dari ebook "109 Jalan Rezeki Guru"
 SLIDES_IDE_BISNIS = [
     {
-        "text": "Pak Guru, Bu Guru — gaji belum cukup? Ada 109 usaha yang bisa jalan tanpa ganggu jam mengajar!",
-        "keyword": "teacher indonesia school classroom"
+        "text": "Pak Guru, Bu Guru... gaji sering habis sebelum akhir bulan? Tenang, ini jalan keluarnya.",
+        "keyword": "rupiah money cash counting"
     },
     {
-        "text": "Ide 1 — Les Privat: 2 anak per hari dikali Rp 50.000 per sesi sama dengan Rp 3 juta per bulan. Bisa dilakukan sore sepulang sekolah!",
-        "keyword": "private tutoring student indonesia learning"
+        "text": "Ada 109 ide usaha yang bisa jalan tanpa mengganggu jam mengajar. Hari ini saya bongkar 5 yang paling mudah.",
+        "keyword": "indonesia traditional market stall"
     },
     {
-        "text": "Ide 2 — Gorengan Sore: Modal Rp 50.000, untung Rp 150.000 per hari. Mulai jam 3 sore, tutup sebelum Maghrib!",
-        "keyword": "indonesian food snack street food"
+        "text": "Ide pertama: Les Privat. Ajari 10 anak sepulang sekolah, tarif Rp 50.000 per sesi. Itu Rp 500.000 dalam satu sore, tanpa modal!",
+        "keyword": "children studying homework books"
     },
     {
-        "text": "Ide 3 — Agen PPOB: Bayar listrik dan BPJS warga dari HP sendiri. Tanpa stok barang. Penghasilan Rp 500 ribu hingga 1,5 juta per bulan!",
-        "keyword": "smartphone digital payment indonesia"
+        "text": "Ide kedua: Gorengan hangat di depan rumah. Modal Rp 50.000, untung Rp 150.000 setiap sore. Receh tapi nyata!",
+        "keyword": "frying fritters street food indonesia"
     },
     {
-        "text": "Ide 4 — Budidaya Lele Ember: Modal Rp 100.000. Bu Siti mulai dari 5 ember, kini 50 ember — jadi pemasok utama warung kecamatan!",
-        "keyword": "fish farming indonesia pond village"
+        "text": "Ide ketiga: Agen PPOB. Bayar listrik, BPJS, dan pulsa dari HP sendiri. Tanpa stok barang, penghasilan Rp 500 ribu sampai 1,5 juta per bulan!",
+        "keyword": "hand holding smartphone payment"
     },
     {
-        "text": "Ide 5 — Kue Basah Jajanan Pasar: Buat malam, jual subuh sebelum berangkat mengajar. Rp 150.000 hingga 500.000 per hari dari dapur sendiri!",
-        "keyword": "indonesian traditional cake market food"
+        "text": "Ide keempat: Budidaya lele dalam ember. Bu Siti mulai dari 5 ember, kini 50 ember dan jadi pemasok warung sekecamatan. Modal awal Rp 100.000!",
+        "keyword": "catfish fish farming pond"
+    },
+    {
+        "text": "Ide kelima: Kue basah jajanan pasar. Dibuat malam, dijual subuh sebelum mengajar. Hasilnya Rp 150 ribu sampai 500 ribu setiap hari!",
+        "keyword": "indonesian traditional cake snack"
+    },
+    {
+        "text": "Semua 109 ide ini lengkap dengan SOP dan jadwal harian, ada di ebook 109 Jalan Rezeki Guru. Jangan tunggu gaji naik! Klik tombol WhatsApp di bawah sekarang.",
+        "keyword": "reading book notebook planning"
     },
 ]
 
@@ -220,25 +228,29 @@ def gambar_gradien(i, path):
 
 def daftar_kueri(keyword):
     """
-    Buat daftar kueri Pixabay dengan prioritas konten Indonesia.
-    Urutan: keyword asli + indonesia, variasi, fallback guru indonesia.
+    Buat daftar kueri Pixabay dengan prioritas objek/aktivitas usaha.
+
+    PENTING (koreksi orang Eropa):
+    Fallback TIDAK memakai kata "teacher"/"people" karena stok foto orang
+    di Pixabay mayoritas wajah Barat. Fallback memakai objek usaha nyata
+    (uang rupiah, pasar, warung) yang netral dan bernuansa Indonesia.
     """
     kw_bersih = (keyword or "").strip()
     hasil = []
 
-    # Prioritas: keyword spesifik dari slide
+    # Prioritas 1: keyword spesifik dari slide (sudah fokus objek)
     if kw_bersih:
         hasil.append(kw_bersih)
 
-    # Variasi pertama: kata pertama + indonesia
-    awal = kw_bersih.split(" ")[0] if kw_bersih else ""
-    if awal and awal.lower() not in ["indonesia"]:
-        kandidat = awal + " indonesia"
-        if kandidat not in hasil:
-            hasil.append(kandidat)
+    # Prioritas 2: dua kata pertama dari keyword (lebih mudah dapat hasil)
+    bagian = kw_bersih.split(" ")
+    if len(bagian) >= 2:
+        dua = bagian[0] + " " + bagian[1]
+        if dua not in hasil:
+            hasil.append(dua)
 
-    # Fallback generik bernuansa Asia/Indonesia
-    for fallback in ["asian teacher school", "indonesia education", "guru indonesia mengajar"]:
+    # Fallback objek usaha (netral, bukan wajah orang)
+    for fallback in ["indonesia traditional market", "rupiah money cash", "small business shop"]:
         if fallback not in hasil:
             hasil.append(fallback)
 
