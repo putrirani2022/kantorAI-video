@@ -1,0 +1,91 @@
+# .github/workflows/generate_video.yml
+# KantorAI — Video Ad Generator
+# Dipicu oleh GAS via GitHub repository_dispatch API
+# Gratis: 2000 menit/bulan untuk public repo
+
+name: KantorAI Generate Video
+
+on:
+  repository_dispatch:
+    types: [generate_video]
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # ── Checkout repo ──
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Setup Python ──
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # ── Cache pip packages (hemat 2-3 menit per run) ──
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: kantorAI-pip-${{ hashFiles('requirements_video.txt') }}
+          restore-keys: |
+            kantorAI-pip-
+
+      # ── Install system deps (font + ffmpeg) ──
+      - name: Install system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ffmpeg \
+            fonts-liberation \
+            fonts-noto \
+            2>/dev/null
+          echo "✅ System deps OK"
+
+      # ── Install Python deps ──
+      - name: Install Python deps
+        run: |
+          pip install --quiet --break-system-packages --upgrade pip
+          pip install --quiet \
+            edge-tts \
+            moviepy \
+            Pillow \
+            requests \
+            numpy
+          echo "✅ Python deps OK"
+
+      # ── Jalankan video generator ──
+      - name: Generate Video
+        env:
+          PAYLOAD_JSON: ${{ toJson(github.event.client_payload) }}
+        run: |
+          echo "🚀 Starting video generation..."
+          python generate_ad_video.py
+          echo "✅ Video generation complete"
+
+      # ── Upload video sebagai artifact (fallback jika Cloudinary gagal) ──
+      - name: Upload video artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iklan-video-${{ github.event.client_payload.job_id }}
+          path: output_video/iklan_video.mp4
+          retention-days: 7
+          if-no-files-found: warn
+
+      # ── Log ringkasan ──
+      - name: Summary
+        if: always()
+        run: |
+          echo "### KantorAI Video Generator" >> $GITHUB_STEP_SUMMARY
+          echo "- **Job ID:** ${{ github.event.client_payload.job_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Voice:** ${{ github.event.client_payload.voice }}" >> $GITHUB_STEP_SUMMARY
+          if [ -f "output_video/iklan_video.mp4" ]; then
+            SIZE=$(du -sh output_video/iklan_video.mp4 | cut -f1)
+            echo "- **Status:** ✅ Berhasil ($SIZE)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Status:** ❌ Gagal" >> $GITHUB_STEP_SUMMARY
+          fi
