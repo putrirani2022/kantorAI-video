@@ -10,8 +10,6 @@ ditulis ulang ringan agar jalan di GitHub Actions:
   - suara per kalimat (Edge-TTS) sehingga durasi tiap adegan pas
   - transisi antar adegan (xfade) + musik latar buatan sendiri (bebas hak cipta)
   - bar progres di bawah, tombol ajakan di adegan terakhir
-  - efek suara halus di tiap transisi (Kenney CC0, lewat repo latent-spaces/brag, MIT)
-  - aturan kreatif dari /brag: hook 2 detik pertama, teks cukup lama terbaca, tiap frame layak posting
 
 Uji lokal tanpa internet:  DRY_RUN=1 python generate_ad_video.py
 """
@@ -587,33 +585,8 @@ def buat_musik(total):
     return path
 
 
-# ---------- 8b. Efek suara (Kenney CC0, dari repo latent-spaces/brag) ----------
-SFX_BASE = "https://raw.githubusercontent.com/latent-spaces/brag/069432cac935ed1895859df201c31436c07fb74e/skills/brag/assets/sfx/"
-SFX_LOKAL = os.environ.get("SFX_LOKAL", "")
-
-
-def ambil_sfx(nama_file, simpan_sebagai):
-    """Unduh satu efek suara. Gagal = lanjut tanpa efek (None)."""
-    path = TMP / simpan_sebagai
-    try:
-        if SFX_LOKAL:
-            path.write_bytes((Path(SFX_LOKAL) / nama_file).read_bytes())
-        elif DRY_RUN:
-            return None
-        else:
-            r = requests.get(SFX_BASE + nama_file, timeout=30)
-            r.raise_for_status()
-            path.write_bytes(r.content)
-        if path.stat().st_size < 500:
-            return None
-        return path
-    except Exception as ex:
-        print("SFX " + nama_file + " dilewati: " + str(ex))
-        return None
-
-
 # ---------- 9. Gabung semua adegan ----------
-def gabung(segmen, musik, sfx=True):
+def gabung(segmen, musik):
     n = len(segmen)
     d = [durasi(s) for s in segmen]
     total = sum(d) - (n - 1) * XF
@@ -627,21 +600,6 @@ def gabung(segmen, musik, sfx=True):
         cmd += ["-i", str(musik)]
     idx_bar = n + (1 if musik else 0)
     cmd += ["-f", "lavfi", "-i", "color=c=0xFFD60A:s=" + str(W) + "x12:d=" + ("%.2f" % total) + ":r=" + str(FPS)]
-
-    efek = []   # (index input, waktu detik, volume)
-    if sfx:
-        nxt = idx_bar + 1
-        impact = ambil_sfx("impact/impactSoft_medium_001.ogg", "sfx_impact.ogg")
-        bong = ambil_sfx("interface/bong_001.ogg", "sfx_bong.ogg")
-        if impact:
-            for k in range(1, n):
-                cmd += ["-i", str(impact)]
-                efek.append((nxt, sum(d[:k]) - k * XF, 0.45))
-                nxt += 1
-        if bong:
-            cmd += ["-i", str(bong)]
-            efek.append((nxt, max(total - 3.2, 0.5), 0.35))
-            nxt += 1
 
     fc = ""
     vprev = "0:v"
@@ -657,18 +615,6 @@ def gabung(segmen, musik, sfx=True):
 
     fc += ("[" + vprev + "][" + str(idx_bar) + ":v]overlay=x='-w+w*t/" + ("%.2f" % total) +
            "':y=1900:eval=frame,fade=t=out:st=" + ("%.2f" % (total - 0.4)) + ":d=0.4,format=yuv420p[vout];")
-
-    mix_in = "[" + aprev + "]"
-    n_mix = 1
-    for e, (idx, waktu, vol) in enumerate(efek):
-        ms = int(max(waktu, 0) * 1000)
-        fc += ("[" + str(idx) + ":a]aformat=sample_rates=44100:channel_layouts=stereo,volume=" + str(vol) +
-               ",adelay=" + str(ms) + "|" + str(ms) + "[fx" + str(e) + "];")
-        mix_in += "[fx" + str(e) + "]"
-        n_mix += 1
-    if n_mix > 1:
-        fc += mix_in + "amix=inputs=" + str(n_mix) + ":duration=first:normalize=0[asuara];"
-        aprev = "asuara"
 
     if idx_musik is not None:
         fc += ("[" + str(idx_musik) + ":a]atrim=0:" + ("%.2f" % total) + ",afade=t=in:d=1,afade=t=out:st=" +
@@ -686,11 +632,7 @@ def gabung(segmen, musik, sfx=True):
     if not ok and musik:
         print("Gabung dengan musik gagal, coba tanpa musik.")
         print(err[-1500:])
-        return gabung(segmen, None, sfx)
-    if not ok and sfx:
-        print("Gabung dengan efek suara gagal, coba tanpa efek.")
-        print(err[-1500:])
-        return gabung(segmen, musik, False)
+        return gabung(segmen, None)
     if not ok:
         print(err[-2500:])
         gagal("ffmpeg gagal menggabung adegan")
