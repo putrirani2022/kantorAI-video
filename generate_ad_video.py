@@ -1,23 +1,16 @@
 """
-generate_ad_video.py  (v9 - storytelling fear-based, harga Rp 87.000, gambar Indonesia)
+generate_ad_video.py  (v11 - Unsplash sebagai sumber utama gambar Indonesia)
 Kantor AI - Video iklan ebook 109 Jalan Rezeki Guru.
 
-Perubahan v9:
-  SCRIPT:
-    - Storytelling fear-based: gaji habis, harga naik, kondisi makin berat.
-    - Harga Rp 87.000 disebut tegas di slide terakhir.
-    - Contoh lele tetap (Bu Siti, 5 ember -> 50 ember).
+Perubahan v11:
+  GAMBAR:
+    - Ganti Pexels (API-nya sedang ditutup) dengan Unsplash API.
+    - Unsplash: gratis, daftar cukup email, konten Asia/Indonesia lebih banyak.
+    - Urutan: Unsplash foto → Pixabay video → Pixabay foto → gradien.
+    - UNSPLASH_KEYWORDS_MAP: keyword English per slide untuk Unsplash.
 
-  GAMBAR (perbaikan mendalam):
-    - Tambah parameter lang=id ke SEMUA panggilan Pixabay API.
-      Pixabay akan mengembalikan konten yang diberi tag dalam Bahasa Indonesia
-      -> lebih banyak foto/video Indonesia dan Asia Tenggara.
-    - Keyword slide 1 diganti ke "guru kelas mengajar" (Bahasa Indonesia).
-    - Keyword fallback juga dalam Bahasa Indonesia.
-    - per_page dinaikkan ke 20 agar ada lebih banyak pilihan.
-
-  SUARA:
-    - Tidak ada perubahan dari v8: Edge-TTS bersih (tanpa pitch shift).
+  LAIN:
+    - Narasi, CTA, suara: tidak berubah dari v9/v10.
 
 Uji lokal:  DRY_RUN=1 python generate_ad_video.py
 """
@@ -38,14 +31,15 @@ from PIL import Image, ImageDraw, ImageFont
 payload = json.loads(os.environ.get("PAYLOAD_JSON", "{}") or "{}")
 DRY_RUN = os.environ.get("DRY_RUN") == "1"
 
-JOB_ID       = payload.get("job_id", "job_unknown")
-SCRIPT_TEXT  = payload.get("script", "")
-TITLE        = payload.get("title", "109 Jalan Rezeki Guru")
-KEYWORDS     = payload.get("keywords", "ikan lele,uang rupiah")
-CALLBACK_URL = payload.get("callback_url", "")
-CLOUD_NAME   = payload.get("cloudinary_cloud", "xw5wrdgm")
-CLOUD_PRESET = payload.get("cloudinary_preset", "kantorAI_preset")
-PIXABAY_KEY  = payload.get("pixabay_key", "")
+JOB_ID         = payload.get("job_id", "job_unknown")
+SCRIPT_TEXT    = payload.get("script", "")
+TITLE          = payload.get("title", "109 Jalan Rezeki Guru")
+KEYWORDS       = payload.get("keywords", "ikan lele,uang rupiah")
+CALLBACK_URL   = payload.get("callback_url", "")
+CLOUD_NAME     = payload.get("cloudinary_cloud", "xw5wrdgm")
+CLOUD_PRESET   = payload.get("cloudinary_preset", "kantorAI_preset")
+PIXABAY_KEY    = payload.get("pixabay_key", "")
+UNSPLASH_KEY   = payload.get("unsplash_key", "")
 
 # --- Suara (Edge-TTS): BERSIH, tanpa geser pitch ---
 EDGE_VOICE = "id-ID-GadisNeural"
@@ -76,11 +70,10 @@ FINAL_VIDEO = OUT / "iklan_guru.mp4"
 print("Job ID    : " + str(JOB_ID))
 print("Title     : " + str(TITLE))
 print("TTS primary: " + ("ElevenLabs" if ELEVENLABS_KEY else "Edge-TTS"))
+print("Unsplash  : " + ("aktif" if UNSPLASH_KEY else "tidak ada key"))
 print("Dry run   : " + str(DRY_RUN))
 
-# ---------- 2. Konten default v9: fear-based + harga Rp 87.000 ----------
-# Keyword dalam Bahasa Indonesia agar Pixabay (lang=id) kembalikan
-# konten Indonesia / Asia Tenggara, bukan wajah Eropa.
+# ---------- 2. Konten default: fear-based + harga Rp 87.000 ----------
 SLIDES_DEFAULT = [
     {
         "text": "Pak Guru, Bu Guru... gaji cair, tapi langsung habis. Cicilan, kebutuhan rumah, biaya anak — semuanya menjepit.",
@@ -103,6 +96,42 @@ SLIDES_DEFAULT = [
         "keyword": "buku membaca notebook belajar"
     },
 ]
+
+# ---------- 2b. Keyword Unsplash (English) per keyword Pixabay ----------
+# Unsplash punya konten Indonesia/Asia yang jauh lebih baik dari Pixabay.
+# Keyword dalam English menghasilkan foto berkualitas tinggi.
+UNSPLASH_KEYWORDS_MAP = {
+    "guru kelas mengajar indonesia": [
+        "Indonesian teacher school",
+        "Asian teacher classroom",
+        "teacher Indonesia school children",
+        "Southeast Asia teacher"
+    ],
+    "pasar tradisional uang rupiah indonesia": [
+        "Indonesia traditional market",
+        "Bali market Indonesia",
+        "Jakarta street market",
+        "Indonesia vendor market"
+    ],
+    "ikan lele ember air": [
+        "catfish pond bucket",
+        "fish farming bucket water",
+        "freshwater fish small pond",
+        "aquaculture small farm"
+    ],
+    "ikan lele panen segar": [
+        "fish harvest Indonesia",
+        "catfish fresh harvest",
+        "Indonesia fish market",
+        "freshwater fish farming harvest"
+    ],
+    "buku membaca notebook belajar": [
+        "Indonesia student reading book",
+        "Asian student studying",
+        "Indonesia education book",
+        "student learning Indonesia"
+    ],
+}
 
 
 # ---------- 3. Utilitas ----------
@@ -209,12 +238,7 @@ def gambar_gradien(i, path):
     img.save(path)
 
 
-def daftar_kueri(keyword):
-    """
-    Kueri Pixabay dalam urutan prioritas.
-    Keyword utama dari slide, lalu fallback dalam Bahasa Indonesia.
-    Pixabay akan dikirim dengan lang=id -> lebih banyak konten Indonesia.
-    """
+def daftar_kueri_pixabay(keyword):
     kw = (keyword or "").strip()
     hasil = []
     if kw:
@@ -224,11 +248,17 @@ def daftar_kueri(keyword):
         dua = bagian[0] + " " + bagian[1]
         if dua not in hasil:
             hasil.append(dua)
-    # Fallback dalam Bahasa Indonesia
     for fallback in ["ikan lele air", "pasar ikan segar", "uang rupiah tabungan"]:
         if fallback not in hasil:
             hasil.append(fallback)
     return hasil[:5]
+
+
+def daftar_kueri_unsplash(keyword):
+    kw = (keyword or "").strip()
+    if kw in UNSPLASH_KEYWORDS_MAP:
+        return UNSPLASH_KEYWORDS_MAP[kw]
+    return ["Indonesian people", "Indonesia daily life", "Asia"]
 
 
 def unduh(url, path, batas_mb=45):
@@ -245,10 +275,50 @@ def unduh(url, path, batas_mb=45):
                 f.write(blok)
 
 
-def cari_footage(i, keyword, dipakai):
-    for q in daftar_kueri(keyword):
+# ---------- 5a. Unsplash (sumber utama foto) ----------
+def cari_foto_unsplash(i, keyword, dipakai):
+    if not UNSPLASH_KEY:
+        return None
+    for q in daftar_kueri_unsplash(keyword):
         try:
-            # lang=id -> Pixabay kembalikan konten bertag Bahasa Indonesia
+            r = requests.get(
+                "https://api.unsplash.com/search/photos",
+                params={
+                    "query": q,
+                    "per_page": 15,
+                    "orientation": "portrait",
+                    "client_id": UNSPLASH_KEY
+                },
+                timeout=20
+            )
+            data = r.json()
+            for h in data.get("results", []):
+                foto_id = "uns_" + str(h.get("id", ""))
+                if foto_id in dipakai:
+                    continue
+                urls = h.get("urls", {})
+                url = urls.get("regular") or urls.get("full")
+                if not url:
+                    continue
+                path = TMP / ("foto_raw_%d.jpg" % i)
+                try:
+                    path.write_bytes(requests.get(url, timeout=40).content)
+                    Image.open(path).verify()
+                except Exception as ex:
+                    print("Unduh Unsplash foto gagal: " + str(ex))
+                    continue
+                dipakai.add(foto_id)
+                print("Slide " + str(i + 1) + ": Unsplash foto '" + q + "' id " + str(h.get("id")))
+                return path
+        except Exception as ex:
+            print("Unsplash foto '" + q + "' gagal: " + str(ex))
+    return None
+
+
+# ---------- 5b. Pixabay (fallback: video dulu, lalu foto) ----------
+def cari_footage_pixabay(i, keyword, dipakai):
+    for q in daftar_kueri_pixabay(keyword):
+        try:
             r = requests.get("https://pixabay.com/api/videos/",
                              params={
                                  "key": PIXABAY_KEY,
@@ -275,20 +345,19 @@ def cari_footage(i, keyword, dipakai):
                 try:
                     unduh(pilih["url"], path)
                 except Exception as ex:
-                    print("Unduh footage gagal: " + str(ex))
+                    print("Unduh Pixabay footage gagal: " + str(ex))
                     continue
                 dipakai.add(h.get("id"))
-                print("Slide " + str(i + 1) + ": footage '" + q + "' id " + str(h.get("id")))
+                print("Slide " + str(i + 1) + ": Pixabay footage '" + q + "'")
                 return path
         except Exception as ex:
             print("Pixabay video '" + q + "' gagal: " + str(ex))
     return None
 
 
-def cari_foto(i, keyword, dipakai):
-    for q in daftar_kueri(keyword):
+def cari_foto_pixabay(i, keyword, dipakai):
+    for q in daftar_kueri_pixabay(keyword):
         try:
-            # lang=id -> konten Indonesia / Asia Tenggara
             r = requests.get("https://pixabay.com/api/",
                              params={
                                  "key": PIXABAY_KEY,
@@ -302,14 +371,14 @@ def cari_foto(i, keyword, dipakai):
                              },
                              timeout=20)
             for h in r.json().get("hits", []):
-                key = "f" + str(h.get("id"))
+                key = "pix_" + str(h.get("id"))
                 if key in dipakai or not h.get("largeImageURL"):
                     continue
                 path = TMP / ("foto_raw_%d.jpg" % i)
                 path.write_bytes(requests.get(h["largeImageURL"], timeout=40).content)
                 Image.open(path).verify()
                 dipakai.add(key)
-                print("Slide " + str(i + 1) + ": foto '" + q + "'")
+                print("Slide " + str(i + 1) + ": Pixabay foto '" + q + "'")
                 return path
         except Exception as ex:
             print("Pixabay foto '" + q + "' gagal: " + str(ex))
@@ -348,13 +417,25 @@ def siapkan_media(i, keyword, dipakai):
         gambar_gradien(i, raw)
         return "foto", foto_siap(i, raw)
 
-    if PIXABAY_KEY:
-        f = cari_footage(i, keyword, dipakai)
-        if f:
-            return "footage", f
-        p = cari_foto(i, keyword, dipakai)
+    # 1. Unsplash foto (sumber utama - konten Indonesia/Asia lebih relevan)
+    if UNSPLASH_KEY:
+        p = cari_foto_unsplash(i, keyword, dipakai)
         if p:
             return "foto", foto_siap(i, p)
+
+    # 2. Pixabay video (fallback)
+    if PIXABAY_KEY:
+        f = cari_footage_pixabay(i, keyword, dipakai)
+        if f:
+            return "footage", f
+
+    # 3. Pixabay foto (fallback terakhir)
+    if PIXABAY_KEY:
+        p = cari_foto_pixabay(i, keyword, dipakai)
+        if p:
+            return "foto", foto_siap(i, p)
+
+    # 4. Gradien
     print("Slide " + str(i + 1) + ": pakai gradien")
     raw = TMP / ("foto_raw_%d.jpg" % i)
     gambar_gradien(i, raw)
@@ -369,10 +450,6 @@ def foto_cadangan(i):
 
 # ---------- 6. Suara (TTS bertingkat, BERSIH) ----------
 def perkaya_audio(raw_path, out_path):
-    """
-    Proses akhir MINIMAL: hanya normalisasi volume (loudnorm).
-    Tidak ada EQ/kompresi berat -> suara tetap natural.
-    """
     cmd = [FF, "-y", "-i", str(raw_path),
            "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
            "-acodec", "libmp3lame", "-q:a", "2",
@@ -407,17 +484,12 @@ def tts_elevenlabs(teks, path_out):
             if r.status_code == 200 and len(r.content) > 800:
                 path_out.write_bytes(r.content)
                 return True
-            elif r.status_code == 401:
-                print("ElevenLabs: API key DITOLAK (401). Beralih ke Edge-TTS.")
-                return False
-            elif r.status_code == 429:
-                print("ElevenLabs: kuota habis (429). Beralih ke Edge-TTS.")
+            elif r.status_code in (401, 429):
                 return False
             else:
-                print("ElevenLabs status " + str(r.status_code) + " percobaan " + str(percobaan + 1)
-                      + " -> " + r.text[:200])
+                print("ElevenLabs status " + str(r.status_code) + " percobaan " + str(percobaan + 1))
         except Exception as ex:
-            print("ElevenLabs error percobaan " + str(percobaan + 1) + ": " + str(ex))
+            print("ElevenLabs error: " + str(ex))
         import time
         time.sleep(2 * (percobaan + 1))
     return False
@@ -462,7 +534,6 @@ def buat_suara(slides):
 
         if pakai_elevenlabs and not elevenlabs_gagal:
             if tts_elevenlabs(s["text"], path_raw):
-                print("Slide " + str(i + 1) + ": ElevenLabs OK")
                 jumlah_eleven += 1
                 berhasil = True
             else:
@@ -472,7 +543,7 @@ def buat_suara(slides):
             async def _jalankan():
                 return await _edge_tts_satu(s["text"], path_raw)
             if not asyncio.run(_jalankan()):
-                gagal("TTS slide " + str(i + 1) + " gagal (ElevenLabs & Edge-TTS)")
+                gagal("TTS slide " + str(i + 1) + " gagal")
             print("Slide " + str(i + 1) + ": Edge-TTS OK")
             jumlah_edge += 1
 
@@ -534,19 +605,16 @@ def overlay_statis(i, n, terakhir):
         f_cta = muat_font(True, 54)
         f_sub = muat_font(False, 34)
 
-        # Harga
         harga = "HANYA Rp 87.000"
         hw = d.textlength(harga, font=f_harga)
         d.rounded_rectangle([(W / 2 - 380, 1430), (W / 2 + 380, 1518)], radius=40, fill=(220, 20, 60, 255))
         d.text(((W - hw) / 2, 1447), harga, font=f_harga, fill=(255, 255, 255, 255))
 
-        # Tombol CTA
         cta = "KLIK LINK DI BAWAH"
         cw = d.textlength(cta, font=f_cta)
         d.rounded_rectangle([(W / 2 - 410, 1540), (W / 2 + 410, 1672)], radius=66, fill=(255, 90, 0, 255))
         d.text(((W - cw) / 2, 1566), cta, font=f_cta, fill=(255, 255, 255, 255))
 
-        # Subtext
         sub = "Dapatkan ebooknya sekarang juga!"
         sw = d.textlength(sub, font=f_sub)
         d.text(((W - sw) / 2, 1692), sub, font=f_sub, fill=(255, 255, 255, 235))
@@ -838,11 +906,9 @@ def gabung(segmen, musik, sfx=True):
     ok, err = jalankan_lunak(cmd)
     if not ok and musik:
         print("Gabung dengan musik gagal, coba tanpa musik.")
-        print(err[-1500:])
         return gabung(segmen, None, sfx)
     if not ok and sfx:
         print("Gabung dengan efek suara gagal, coba tanpa efek.")
-        print(err[-1500:])
         return gabung(segmen, musik, False)
     if not ok:
         print(err[-2500:])
@@ -872,7 +938,7 @@ def upload_cloudinary():
 # ---------- MAIN ----------
 def main():
     print("=" * 40)
-    print("KANTOR AI - generate video v9")
+    print("KANTOR AI - generate video v11")
     print("=" * 40)
 
     slides = susun_slide()
