@@ -1,24 +1,25 @@
 """
-generate_ad_video.py  (v7.1 - potret penuh, gambar Indonesia, 5 ide bisnis)
-Kantor AI - Video iklan otomatis untuk ebook 109 Jalan Rezeki Guru.
+generate_ad_video.py  (v8 - fokus 1 ide, suara natural, tanpa wajah Eropa)
+Kantor AI - Video iklan ebook 109 Jalan Rezeki Guru.
 
-Teknik yang dipelajari dari:
-  - MoneyPrinterTurbo (MIT): footage Pixabay, subtitle sinkron, musik, transisi
-  - latent-spaces/brag (MIT): efek suara Kenney CC0, aturan kreatif hook 2 detik
-  - jamiepine/voicebox (MIT): TTS bertingkat, Chatterbox/Kokoro engine analysis
-  - ElevenLabs API: suara Bahasa Indonesia paling natural (gratis 10.000 karakter/bulan)
+Perubahan mendalam v8:
+  SUARA (poin 3):
+    - Edge-TTS dibuat BERSIH: tanpa geser pitch, rate natural -5%.
+      (Geser pitch dan EQ/kompresi berat di versi lama membuat suara
+       terdengar metalik/robot. Keduanya dihapus.)
+    - Hanya loudnorm (normalisasi volume) sebagai proses akhir.
+    - ElevenLabs tetap jadi prioritas jika ELEVENLABS_KEY valid.
+    - Mesin suara yang dipakai dilaporkan ke Telegram (ElevenLabs / Edge-TTS)
+      supaya mudah diagnosa.
 
-Strategi TTS (diurutkan dari terbaik):
-  1. ElevenLabs  -> jika env ELEVENLABS_KEY diisi (gratis 10k karakter/bulan)
-  2. Edge-TTS    -> cadangan selalu tersedia, dipercantik dengan EQ ffmpeg
+  GAMBAR (poin 2):
+    - Video fokus 1 ide (lele dalam ember), kata kunci HANYA objek/hewan
+      (ikan, air, ember, uang, buku) sehingga TIDAK ada wajah orang Eropa.
 
-Koreksi v7.1:
-  - Footage mengisi penuh frame potret 1080x1920 (tidak letterbox landscape)
-  - Pixabay mencari gambar/video bernuansa Indonesia (bukan orang Eropa)
-  - Default video menampilkan 5 contoh ide bisnis yang mudah dicoba semua guru
-  - Teks dan warna teks dipertahankan
+  DURASI (poin 1):
+    - 1 ide saja, 5 slide, sekitar 35-45 detik.
 
-Uji lokal tanpa internet:  DRY_RUN=1 python generate_ad_video.py
+Uji lokal:  DRY_RUN=1 python generate_ad_video.py
 """
 
 import os
@@ -40,36 +41,34 @@ DRY_RUN = os.environ.get("DRY_RUN") == "1"
 JOB_ID       = payload.get("job_id", "job_unknown")
 SCRIPT_TEXT  = payload.get("script", "")
 TITLE        = payload.get("title", "109 Jalan Rezeki Guru")
-KEYWORDS     = payload.get("keywords", "guru indonesia,pendidikan")
+KEYWORDS     = payload.get("keywords", "fish pond,money")
 CALLBACK_URL = payload.get("callback_url", "")
 CLOUD_NAME   = payload.get("cloudinary_cloud", "xw5wrdgm")
 CLOUD_PRESET = payload.get("cloudinary_preset", "kantorAI_preset")
 PIXABAY_KEY  = payload.get("pixabay_key", "")
 
-# TTS settings
-EDGE_VOICE   = "id-ID-GadisNeural"
-EDGE_RATE    = "-10%"     # sedikit lebih lambat = lebih natural
-EDGE_PITCH   = "+8Hz"     # sedikit lebih hangat untuk suara perempuan
+# --- Suara (Edge-TTS): BERSIH, tanpa geser pitch ---
+EDGE_VOICE = "id-ID-GadisNeural"   # suara perempuan neural (Azure)
+EDGE_RATE  = "-5%"                 # sedikit lebih tenang, tetap natural
+# Catatan: pitch TIDAK digeser. Geser pitch membuat suara neural jadi robot.
 
-# ElevenLabs settings (diisi lewat GitHub Actions secret)
-# Daftar suara ElevenLabs yang bagus untuk Bahasa Indonesia (eleven_multilingual_v2):
-#   Sarah  : 21m00Tcm4TlvDq8ikWAM   (perempuan, lembut)
-#   Rachel : EXAVITQu4vr4xnSDxMaL   (perempuan, jernih)
-#   Aria   : 9BWtsMINqrJLrRacOk9x    (perempuan, profesional)
-# Ganti ELEVENLABS_VOICE_ID di GitHub Actions Secrets jika ingin suara lain.
+# --- ElevenLabs (opsional, lebih natural) ---
 ELEVENLABS_KEY      = os.environ.get("ELEVENLABS_KEY", "")
 ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
 ELEVENLABS_MODEL    = "eleven_multilingual_v2"
 
+# Mesin suara yang benar-benar dipakai (untuk laporan ke Telegram)
+TTS_DIPAKAI = "Edge-TTS"
+
 W, H = 1080, 1920
 FPS = 30
-PAD = 0.55
+PAD = 0.5
 XF = 0.35
-ZOOM = 0.20
+ZOOM = 0.18
 SUB_Y = 1050
 SUB_H = 420
-MUSIK_VOL = 0.20
-TRANSISI = ["fade", "slideleft", "wipeleft", "circleopen", "fadeblack"]
+MUSIK_VOL = 0.16
+TRANSISI = ["fade", "slideleft", "circleopen", "fade"]
 
 OUT = Path("output")
 TMP = OUT / "tmp"
@@ -78,45 +77,31 @@ FINAL_VIDEO = OUT / "iklan_guru.mp4"
 
 print("Job ID    : " + str(JOB_ID))
 print("Title     : " + str(TITLE))
-print("Callback  : " + str(CALLBACK_URL))
+print("TTS primary: " + ("ElevenLabs" if ELEVENLABS_KEY else "Edge-TTS"))
 print("Dry run   : " + str(DRY_RUN))
-print("TTS engine: " + ("ElevenLabs" if ELEVENLABS_KEY else "Edge-TTS"))
 
-# ---------- 2. Konten default: 5 ide bisnis ----------
-# Digunakan saat tidak ada payload slides/script dari GAS
-# Masing-masing slide sesuai ide bisnis dari ebook "109 Jalan Rezeki Guru"
-SLIDES_IDE_BISNIS = [
+# ---------- 2. Konten default: 1 ide (lele dalam ember) ----------
+# Kata kunci HANYA objek/hewan -> tidak ada wajah orang.
+SLIDES_DEFAULT = [
     {
-        "text": "Pak Guru, Bu Guru... gaji sering habis sebelum akhir bulan? Tenang, ini jalan keluarnya.",
-        "keyword": "rupiah money cash counting"
+        "text": "Pak Guru, Bu Guru... mau punya penghasilan tambahan tanpa mengganggu jam mengajar?",
+        "keyword": "rupiah money coins savings"
     },
     {
-        "text": "Ada 109 ide usaha yang bisa jalan tanpa mengganggu jam mengajar. Hari ini saya bongkar 5 yang paling mudah.",
-        "keyword": "indonesia traditional market stall"
+        "text": "Rahasianya satu: budidaya lele dalam ember, cukup di belakang rumah.",
+        "keyword": "fish pond aquaculture water"
     },
     {
-        "text": "Ide pertama: Les Privat. Ajari 10 anak sepulang sekolah, tarif Rp 50.000 per sesi. Itu Rp 500.000 dalam satu sore, tanpa modal!",
-        "keyword": "children studying homework books"
+        "text": "Bu Siti, seorang guru honorer, memulai hanya dari 5 ember. Modalnya cuma Rp 100.000.",
+        "keyword": "buckets water containers"
     },
     {
-        "text": "Ide kedua: Gorengan hangat di depan rumah. Modal Rp 50.000, untung Rp 150.000 setiap sore. Receh tapi nyata!",
-        "keyword": "frying fritters street food indonesia"
+        "text": "Dalam 1,5 tahun embernya menjadi 50, dan kini ia pemasok lele untuk warung sekecamatan.",
+        "keyword": "fresh fish market harvest"
     },
     {
-        "text": "Ide ketiga: Agen PPOB. Bayar listrik, BPJS, dan pulsa dari HP sendiri. Tanpa stok barang, penghasilan Rp 500 ribu sampai 1,5 juta per bulan!",
-        "keyword": "hand holding smartphone payment"
-    },
-    {
-        "text": "Ide keempat: Budidaya lele dalam ember. Bu Siti mulai dari 5 ember, kini 50 ember dan jadi pemasok warung sekecamatan. Modal awal Rp 100.000!",
-        "keyword": "catfish fish farming pond"
-    },
-    {
-        "text": "Ide kelima: Kue basah jajanan pasar. Dibuat malam, dijual subuh sebelum mengajar. Hasilnya Rp 150 ribu sampai 500 ribu setiap hari!",
-        "keyword": "indonesian traditional cake snack"
-    },
-    {
-        "text": "Semua 109 ide ini lengkap dengan SOP dan jadwal harian, ada di ebook 109 Jalan Rezeki Guru. Jangan tunggu gaji naik! Klik tombol WhatsApp di bawah sekarang.",
-        "keyword": "reading book notebook planning"
+        "text": "Panduan lengkapnya ada di ebook 109 Jalan Rezeki Guru. Klik link di bawah dan mulai hari ini juga!",
+        "keyword": "open book reading notebook"
     },
 ]
 
@@ -144,6 +129,7 @@ def kirim_callback(video_url, status="success", error_msg=""):
         "status": status,
         "error": error_msg,
         "title": TITLE,
+        "tts_engine": TTS_DIPAKAI,
     }
     try:
         r = requests.post(CALLBACK_URL, json=body, timeout=60)
@@ -192,13 +178,12 @@ def susun_slide():
 
     if not slides and SCRIPT_TEXT.strip():
         kalimat = [k.strip() for k in re.split(r"(?<=[.!?])\s+", SCRIPT_TEXT) if k.strip()]
-        kws = [k.strip() for k in KEYWORDS.split(",") if k.strip()] or ["guru indonesia"]
+        kws = [k.strip() for k in KEYWORDS.split(",") if k.strip()] or ["fish pond"]
         for i, k in enumerate(kalimat[:8]):
             slides.append({"text": k, "keyword": kws[i % len(kws)]})
 
-    # Jika tidak ada konten dari payload, pakai 5 ide bisnis default
     if not slides:
-        slides = [dict(s) for s in SLIDES_IDE_BISNIS]
+        slides = [dict(s) for s in SLIDES_DEFAULT]
 
     if not slides:
         gagal("Tidak ada teks untuk dibuat slide")
@@ -208,7 +193,6 @@ def susun_slide():
 # ---------- 5. Media latar ----------
 GRADIEN = [
     ((20, 80, 120), (30, 120, 180)),
-    ((90, 40, 110), (150, 70, 160)),
     ((20, 100, 70), (50, 160, 110)),
     ((120, 60, 20), (200, 110, 40)),
     ((30, 60, 100), (60, 100, 170)),
@@ -228,32 +212,21 @@ def gambar_gradien(i, path):
 
 def daftar_kueri(keyword):
     """
-    Buat daftar kueri Pixabay dengan prioritas objek/aktivitas usaha.
-
-    PENTING (koreksi orang Eropa):
-    Fallback TIDAK memakai kata "teacher"/"people" karena stok foto orang
-    di Pixabay mayoritas wajah Barat. Fallback memakai objek usaha nyata
-    (uang rupiah, pasar, warung) yang netral dan bernuansa Indonesia.
+    Kueri Pixabay. Fallback HANYA objek (bukan orang) agar tidak muncul
+    wajah Barat: ikan, air, uang, pasar.
     """
-    kw_bersih = (keyword or "").strip()
+    kw = (keyword or "").strip()
     hasil = []
-
-    # Prioritas 1: keyword spesifik dari slide (sudah fokus objek)
-    if kw_bersih:
-        hasil.append(kw_bersih)
-
-    # Prioritas 2: dua kata pertama dari keyword (lebih mudah dapat hasil)
-    bagian = kw_bersih.split(" ")
+    if kw:
+        hasil.append(kw)
+    bagian = kw.split(" ")
     if len(bagian) >= 2:
         dua = bagian[0] + " " + bagian[1]
         if dua not in hasil:
             hasil.append(dua)
-
-    # Fallback objek usaha (netral, bukan wajah orang)
-    for fallback in ["indonesia traditional market", "rupiah money cash", "small business shop"]:
+    for fallback in ["fish pond water", "fresh fish market", "rupiah money"]:
         if fallback not in hasil:
             hasil.append(fallback)
-
     return hasil[:5]
 
 
@@ -326,10 +299,6 @@ def cari_foto(i, keyword, dipakai):
 
 
 def foto_siap(i, raw_path):
-    """
-    Siapkan foto portrait 1080x1920.
-    Foto digelapi sedikit agar teks di atasnya terbaca.
-    """
     final_path = TMP / ("foto_%d.jpg" % i)
     img = Image.open(raw_path).convert("RGB")
     rasio = W / H
@@ -341,7 +310,6 @@ def foto_siap(i, raw_path):
         nh = int(w / rasio)
         img = img.crop((0, (h - nh) // 2, w, (h - nh) // 2 + nh))
     img = img.resize((W, H), Image.LANCZOS)
-    # Gelapi sedikit agar teks terbaca
     img = Image.blend(img, Image.new("RGB", img.size, (0, 0, 0)), 0.35)
     img.save(final_path, quality=92)
     return final_path
@@ -381,36 +349,25 @@ def foto_cadangan(i):
     return foto_siap(i, raw)
 
 
-# ---------- 6. Suara (TTS bertingkat) ----------
+# ---------- 6. Suara (TTS bertingkat, BERSIH) ----------
 def perkaya_audio(raw_path, out_path):
     """
-    Tambahkan kehangatan suara lewat ffmpeg:
-      - equalizer  : naikkan frekuensi suara manusia (200-3000 Hz)
-      - compand    : kompresi dinamis lembut agar suara lebih penuh
-      - volume     : normalisasi keluaran
-    Jika gagal, salin raw ke out tanpa perubahan.
+    Proses akhir MINIMAL: hanya normalisasi volume (loudnorm).
+    Tidak ada EQ/kompresi berat -> suara tetap natural, tidak metalik.
+    Jika gagal, salin apa adanya.
     """
-    filter_audio = (
-        "equalizer=f=200:width_type=o:width=2:g=2,"
-        "equalizer=f=800:width_type=o:width=1.5:g=1.5,"
-        "equalizer=f=5000:width_type=o:width=1:g=-2,"
-        "equalizer=f=9000:width_type=o:width=1:g=-3,"
-        "compand=attacks=0.05:decays=0.3:points=-70/-70|-24/-16|-6/-4|0/-3:soft-knee=6:gain=2,"
-        "volume=1.15"
-    )
     cmd = [FF, "-y", "-i", str(raw_path),
-           "-af", filter_audio,
-           "-acodec", "libmp3lame", "-q:a", "3",
+           "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+           "-acodec", "libmp3lame", "-q:a", "2",
            "-ar", "44100", "-ac", "2", str(out_path)]
     ok, err = jalankan_lunak(cmd)
     if not ok:
-        print("Perkaya audio gagal, pakai asli: " + err[-200:])
+        print("Loudnorm gagal, pakai asli: " + err[-200:])
         import shutil
         shutil.copy(str(raw_path), str(out_path))
 
 
 def tts_elevenlabs(teks, path_out):
-    """Minta audio dari ElevenLabs API. Kembalikan True jika berhasil."""
     url = "https://api.elevenlabs.io/v1/text-to-speech/" + ELEVENLABS_VOICE_ID
     headers = {
         "xi-api-key": ELEVENLABS_KEY,
@@ -421,9 +378,9 @@ def tts_elevenlabs(teks, path_out):
         "text": teks,
         "model_id": ELEVENLABS_MODEL,
         "voice_settings": {
-            "stability": 0.45,
-            "similarity_boost": 0.80,
-            "style": 0.35,
+            "stability": 0.50,
+            "similarity_boost": 0.75,
+            "style": 0.0,
             "use_speaker_boost": True,
         },
     }
@@ -434,13 +391,14 @@ def tts_elevenlabs(teks, path_out):
                 path_out.write_bytes(r.content)
                 return True
             elif r.status_code == 401:
-                print("ElevenLabs: API key salah, beralih ke Edge-TTS")
+                print("ElevenLabs: API key DITOLAK (401). Beralih ke Edge-TTS.")
                 return False
             elif r.status_code == 429:
-                print("ElevenLabs: batas karakter bulan ini habis, beralih ke Edge-TTS")
+                print("ElevenLabs: kuota habis (429). Beralih ke Edge-TTS.")
                 return False
             else:
-                print("ElevenLabs status " + str(r.status_code) + " percobaan " + str(percobaan + 1))
+                print("ElevenLabs status " + str(r.status_code) + " percobaan " + str(percobaan + 1)
+                      + " -> " + r.text[:200])
         except Exception as ex:
             print("ElevenLabs error percobaan " + str(percobaan + 1) + ": " + str(ex))
         import time
@@ -452,7 +410,8 @@ async def _edge_tts_satu(teks, path_out, percobaan_maks=3):
     import edge_tts
     for percobaan in range(percobaan_maks):
         try:
-            comm = edge_tts.Communicate(teks, EDGE_VOICE, rate=EDGE_RATE, pitch=EDGE_PITCH)
+            # BERSIH: hanya rate, tanpa pitch
+            comm = edge_tts.Communicate(teks, EDGE_VOICE, rate=EDGE_RATE)
             await comm.save(str(path_out))
             if path_out.exists() and path_out.stat().st_size > 800:
                 return True
@@ -463,9 +422,11 @@ async def _edge_tts_satu(teks, path_out, percobaan_maks=3):
 
 
 def buat_suara(slides):
+    global TTS_DIPAKAI
     print("Membuat suara per slide...")
 
     if DRY_RUN:
+        TTS_DIPAKAI = "DRY_RUN"
         for i, s in enumerate(slides):
             path = TMP / ("voice_%d.mp3" % i)
             jalankan([FF, "-y", "-f", "lavfi", "-i", "sine=f=220:d=%s" % (3.0 + 0.4 * i),
@@ -475,6 +436,8 @@ def buat_suara(slides):
 
     pakai_elevenlabs = bool(ELEVENLABS_KEY)
     elevenlabs_gagal = False
+    jumlah_eleven = 0
+    jumlah_edge = 0
 
     for i, s in enumerate(slides):
         path_raw = TMP / ("voice_raw_%d.mp3" % i)
@@ -482,9 +445,9 @@ def buat_suara(slides):
         berhasil = False
 
         if pakai_elevenlabs and not elevenlabs_gagal:
-            ok = tts_elevenlabs(s["text"], path_raw)
-            if ok:
+            if tts_elevenlabs(s["text"], path_raw):
                 print("Slide " + str(i + 1) + ": ElevenLabs OK")
+                jumlah_eleven += 1
                 berhasil = True
             else:
                 elevenlabs_gagal = True
@@ -492,18 +455,25 @@ def buat_suara(slides):
         if not berhasil:
             async def _jalankan():
                 return await _edge_tts_satu(s["text"], path_raw)
-            ok = asyncio.run(_jalankan())
-            if not ok:
-                gagal("TTS slide " + str(i + 1) + " gagal baik ElevenLabs maupun Edge-TTS")
+            if not asyncio.run(_jalankan()):
+                gagal("TTS slide " + str(i + 1) + " gagal (ElevenLabs & Edge-TTS)")
             print("Slide " + str(i + 1) + ": Edge-TTS OK")
+            jumlah_edge += 1
 
         perkaya_audio(path_raw, path_final)
         s["audio"] = path_final
 
-    print("Semua suara selesai.")
+    # Tentukan mesin dominan untuk laporan
+    if jumlah_eleven > 0 and jumlah_edge == 0:
+        TTS_DIPAKAI = "ElevenLabs"
+    elif jumlah_eleven > 0 and jumlah_edge > 0:
+        TTS_DIPAKAI = "Campuran (ElevenLabs+Edge)"
+    else:
+        TTS_DIPAKAI = "Edge-TTS"
+    print("MESIN SUARA DIPAKAI: " + TTS_DIPAKAI)
 
 
-# ---------- 7. Gambar overlay statis ----------
+# ---------- 7. Overlay statis ----------
 def muat_font(tebal, ukuran):
     daftar = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if tebal else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -521,35 +491,22 @@ def muat_font(tebal, ukuran):
 
 
 def overlay_statis(i, n, terakhir):
-    """
-    Panel overlay transparan berisi:
-    - Gradien gelap di atas (untuk area brand bar)
-    - Gradien gelap di bawah (untuk area subtitle dan CTA)
-    - Brand bar kuning
-    - Dot indikator slide
-    - (Jika terakhir) tombol CTA
-    """
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
 
-    # Gradien gelap atas (y=0 s/d y=320): agar brand bar terbaca
     for y in range(320):
         alpha = int(180 * (1.0 - y / 320.0))
         d.line([(0, y), (W, y)], fill=(0, 0, 0, alpha))
-
-    # Gradien gelap bawah (y=950 s/d y=H): agar subtitle terbaca di atas footage
     for y in range(950, H):
         alpha = int(min(200, (y - 950) / float(H - 950) * 200))
         d.line([(0, y), (W, y)], fill=(0, 0, 0, alpha))
 
-    # Brand bar kuning
     f_brand = muat_font(True, 38)
     brand = "109 JALAN REZEKI GURU"
     bw = d.textlength(brand, font=f_brand)
     d.rounded_rectangle([((W - bw) / 2 - 36, 120), ((W + bw) / 2 + 36, 200)], radius=40, fill=(255, 200, 0, 255))
     d.text(((W - bw) / 2, 138), brand, font=f_brand, fill=(20, 20, 20, 255))
 
-    # Dot indikator slide
     jarak = 44
     x0 = W / 2 - (n - 1) * jarak / 2
     for k in range(n):
@@ -557,17 +514,16 @@ def overlay_statis(i, n, terakhir):
         warna = (255, 255, 255, 240) if k == i else (255, 255, 255, 110)
         d.ellipse([x0 + k * jarak - r, 250 - r, x0 + k * jarak + r, 250 + r], fill=warna)
 
-    # Tombol CTA pada slide terakhir
     if terakhir:
-        f_cta = muat_font(True, 52)
+        f_cta = muat_font(True, 54)
         f_sub = muat_font(False, 36)
         cta = "KLIK LINK DI BAWAH"
         cw = d.textlength(cta, font=f_cta)
-        d.rounded_rectangle([(W / 2 - 400, 1530), (W / 2 + 400, 1660)], radius=65, fill=(255, 90, 0, 255))
+        d.rounded_rectangle([(W / 2 - 410, 1530), (W / 2 + 410, 1662)], radius=66, fill=(255, 90, 0, 255))
         d.text(((W - cw) / 2, 1556), cta, font=f_cta, fill=(255, 255, 255, 255))
-        sub = "Info lengkap via WhatsApp"
+        sub = "Dapatkan ebooknya sekarang"
         sw = d.textlength(sub, font=f_sub)
-        d.text(((W - sw) / 2, 1678), sub, font=f_sub, fill=(255, 255, 255, 235))
+        d.text(((W - sw) / 2, 1680), sub, font=f_sub, fill=(255, 255, 255, 235))
 
     path = TMP / ("statis_%d.png" % i)
     img.save(path)
@@ -598,7 +554,7 @@ def gambar_potongan(i, k, kata_list):
     img = Image.new("RGBA", (W, SUB_H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
 
-    ukuran = 96
+    ukuran = 100
     while True:
         f = muat_font(True, ukuran)
         spasi = d.textlength(" ", font=f)
@@ -652,25 +608,13 @@ def jadwal_subtitle(i, teks, lama_bicara):
     return hasil
 
 
-# ---------- 8. Render tiap adegan ----------
+# ---------- 8. Render adegan ----------
 def filter_dasar(jenis, media, frames):
-    """
-    Hasilkan filter ffmpeg untuk latar.
-
-    Perubahan v7.1:
-    - Footage (video): MENGISI PENUH frame potret 1080x1920
-      Cara: scale dengan force_original_aspect_ratio=increase lalu crop tengah.
-      Ini menghilangkan tampilan landscape (letterbox) yang terlihat aneh di portrait.
-    - Foto: zoompan seperti sebelumnya (sudah portrait 1:1).
-    """
     if jenis == "foto":
         z = "1+%s*on/%d" % (ZOOM, frames)
         return ("[0:v]zoompan=z='" + z + "':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
                 ":d=" + str(frames) + ":s=" + str(W) + "x" + str(H) + ":fps=" + str(FPS)
                 + ",format=yuv420p[base];")
-
-    # Footage: isi penuh frame potret — scale cover lalu crop tengah
-    # Ini membuat video apapun (landscape maupun portrait) mengisi 1080x1920 penuh
     return (
         "[0:v]fps=" + str(FPS) +
         ",scale=" + str(W) + ":" + str(H) +
@@ -819,11 +763,11 @@ def gabung(segmen, musik, sfx=True):
         if impact:
             for k in range(1, n):
                 cmd += ["-i", str(impact)]
-                efek.append((nxt, sum(d[:k]) - k * XF, 0.45))
+                efek.append((nxt, sum(d[:k]) - k * XF, 0.4))
                 nxt += 1
         if bong:
             cmd += ["-i", str(bong)]
-            efek.append((nxt, max(total - 3.2, 0.5), 0.35))
+            efek.append((nxt, max(total - 3.0, 0.5), 0.3))
             nxt += 1
 
     fc = ""
@@ -902,7 +846,7 @@ def upload_cloudinary():
 # ---------- MAIN ----------
 def main():
     print("=" * 40)
-    print("KANTOR AI - generate video v7.1")
+    print("KANTOR AI - generate video v8")
     print("=" * 40)
 
     slides = susun_slide()
@@ -921,7 +865,7 @@ def main():
     total_est = sum(durasi(x) for x in segmen) - (n - 1) * XF
     musik = buat_musik(total_est)
     total = gabung(segmen, musik)
-    print("Video OK, ukuran " + str(FINAL_VIDEO.stat().st_size) + " byte, durasi " + ("%.1f" % total) + " detik")
+    print("Video OK, durasi " + ("%.1f" % total) + " detik, suara " + TTS_DIPAKAI)
 
     if DRY_RUN:
         print("DRY_RUN selesai, tidak upload.")
